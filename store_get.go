@@ -22,7 +22,7 @@ func (s *Store) Get(
 	}
 
 	key := s.baseKeyPrefix + keyPrefixItem + typeName + ":" + id
-	v, err := s.conn.HGetAll(ctx, key).Result()
+	v, err := s.conn.Get(ctx, key).Result()
 	if err != nil {
 		if err == redis.Nil {
 			// item not found
@@ -32,15 +32,10 @@ func (s *Store) Get(
 		err = fmt.Errorf("redis get: %w", err)
 		return
 	}
-	item = make(Item)
-	for field, value := range v {
-		var dv interface{}
-		err = gobDecode(value, dv)
-		if err != nil {
-			err = fmt.Errorf("gob decode (field: %s): %w", field, err)
-			return
-		}
-		item[field] = dv
+	item, err = s.decodeItem(v)
+	if err != nil {
+		err = fmt.Errorf("decode item: %w", err)
+		return
 	}
 	found = true
 	return

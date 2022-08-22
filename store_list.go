@@ -3,27 +3,20 @@ package toy
 import (
 	"context"
 	"fmt"
-
-	"github.com/go-redis/redis/v8"
 )
 
 // TODO: this implementation won't work in clustered deployments because it's
 //  accessing keys using programmatically-generated names inside the script.
 // KEYS:
-//  [1] type key
-//  [2] index key
+//  [1] index key
 // ARGV:
 //  [1] range func name
 //  [2] offset
 //  [3] limit
 //  [4] item key prefix
-//  [5] index field
 var scriptList = `
-if redis.call('HEXISTS', KEYS[1], ARGV[5]) ~= 1 then
-	return false
-end
 local hasMore = false
-local itemIDs = redis.call(ARGV[1], KEYS[2], ARGV[2], ARGV[2]+ARGV[3])
+local itemIDs = redis.call(ARGV[1], KEYS[1], ARGV[2], ARGV[2]+ARGV[3])
 local res = {}
 if #itemIDs > tonumber(ARGV[3]) then
 	table.insert(res, true)
@@ -62,7 +55,24 @@ func (s *Store) List(
 		return
 	}
 
-	typeKey := s.baseKeyPrefix + keyPrefixType + typeName
+	// get type
+	typ, err := s.getType(ctx, typeName)
+	if err != nil {
+		err = fmt.Errorf("get type: %w", err)
+		return
+	}
+	var isIndexed bool
+	for _, fieldName := range typ.Indexes {
+		if fieldName == sortBy {
+			isIndexed = true
+			break
+		}
+	}
+	if !isIndexed {
+		err = fmt.Errorf("sort by field must be indexed: %s", sortBy)
+		return
+	}
+
 	indexKey := s.baseKeyPrefix + keyPrefixIndex + typeName + ":" + sortBy
 	rangeFuncName := "ZRANGE"
 	if descending {
@@ -73,7 +83,6 @@ func (s *Store) List(
 		ctx,
 		s.conn,
 		[]string{
-			typeKey,
 			indexKey,
 		},
 		[]interface{}{
@@ -81,15 +90,9 @@ func (s *Store) List(
 			offset,
 			limit,
 			s.baseKeyPrefix + keyPrefixItem + typeName + ":",
-			sortBy,
 		},
 	).Result()
 	if err != nil {
-		if err == redis.Nil {
-			// sort by field is not indexed
-			err = fmt.Errorf("sort by field must be indexed: %s", sortBy)
-			return
-		}
 		err = fmt.Errorf("redis script run: %w", err)
 		return
 	}

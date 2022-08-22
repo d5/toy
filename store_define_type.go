@@ -14,13 +14,17 @@ func (s *Store) DefineType(
 		return fmt.Errorf("type name must not be empty")
 	}
 
-	typeKey := s.baseKeyPrefix + keyPrefixType + typeName
-	var values []interface{}
-	for _, index := range indexes {
-		values = append(values, index)
-		values = append(values, 1)
+	v, err := s.encodeType(
+		itemType{
+			Indexes: indexes,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("encode type: %w", err)
 	}
-	_, err := s.conn.HSet(ctx, typeKey, values...).Result()
+
+	typeKey := s.baseKeyPrefix + keyPrefixType + typeName
+	_, err = s.conn.Set(ctx, typeKey, v, 0).Result()
 	if err != nil {
 		return fmt.Errorf("redis set: %w", err)
 	}
