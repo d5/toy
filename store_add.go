@@ -7,18 +7,28 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
+// TODO: this implementation won't work in clustered deployments because it's
+//  accessing keys using programmatically-generated names inside the script.
 // KEYS:
-//  [1] item key
-//  [2...] index keys
+//  [1] type key
+//  [2] item key
 // ARGV:
 //  [1] item ID
-//  [2] item data
-//  [3...] indexed field values
+//  [2] index key prefix
+//  [3...] (field1, value1, field2, value2, ...)
+// RETURN:
+//  0: success
+//  1: type not defined
 var scriptAdd = `
-redis.call('SET', KEYS[1], ARGV[2])
-for idx=2,#KEYS do
-	redis.call('ZADD', KEYS[idx], ARGV[idx+1], ARGV[1])  
+redis.log(redis.LOG_NOTICE, ARGV[3])
+local indexes = redis.call('HKEYS', KEYS[1])
+if #indexes == 0 then
+	return 1
 end
+redis.call('HSET', KEYS[2], unpack(ARGV, 3))
+-- for i=1,#indexes do
+-- 	redis.call('ZADD', ARGV[3]..indexes[i], ARGV[idx+1], ARGV[1])  
+-- end
 `
 
 func (s *Store) Add(
@@ -81,29 +91,23 @@ func (s *Store) Add(
 		}
 	}
 
-	// encoded item data
-	itemData, err := s.encodeItem(item)
-	if err != nil {
-		return fmt.Errorf("encode item: %w", err)
-	}
-
 	// keys and args
 	keys := []string{
+		s.baseKeyPrefix + keyPrefixType + typeName,
 		s.baseKeyPrefix + keyPrefixItem + typeName + ":" + id,
 	}
 	args := []interface{}{
 		id,
-		itemData,
+		s.baseKeyPrefix + keyPrefixIndex + typeName + ":",
 	}
-	for _, index := range typ.Indexes {
-		keys = append(
-			keys,
-			s.baseKeyPrefix+keyPrefixIndex+typeName+":"+index,
-		)
-		args = append(
-			args,
-			indexValues[index],
-		)
+	for field, value := range item {
+		args = append(args, field)
+
+		dv, err := gobEncode(value)
+		if err != nil {
+			return fmt.Errorf("gob encode (field: %s): %w", field, err)
+		}
+		args = append(args, dv)
 	}
 
 	_, err = s.scriptAdd.Run(

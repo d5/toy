@@ -34,18 +34,16 @@ func (s *Store) getType(
 	typeName string,
 ) (*itemType, error) {
 	typeKey := s.baseKeyPrefix + keyPrefixType + typeName
-	v, err := s.conn.Get(ctx, typeKey).Result()
+	indexes, err := s.conn.HKeys(ctx, typeKey).Result()
 	if err != nil {
-		if err == redis.Nil {
-			return nil, fmt.Errorf("type not defined: %s", typeName)
-		}
 		return nil, fmt.Errorf("redis get: %w", err)
 	}
-	typ, err := s.decodeType(v)
-	if err != nil {
-		return nil, fmt.Errorf("decode type: %w", err)
+	if len(indexes) == 0 {
+		return nil, fmt.Errorf("type not defined: %s", typeName)
 	}
-	return &typ, nil
+	return &itemType{
+		Indexes: indexes,
+	}, nil
 }
 
 func (s *Store) encodeItem(item Item) (string, error) {
@@ -86,4 +84,23 @@ func (s *Store) decodeType(v string) (itemType, error) {
 		return itemType{}, fmt.Errorf("decode: %w", err)
 	}
 	return typ, nil
+}
+
+func gobEncode(v interface{}) (string, error) {
+	var b bytes.Buffer
+	enc := gob.NewEncoder(&b)
+	err := enc.Encode(v)
+	if err != nil {
+		return "", fmt.Errorf("encode: %w", err)
+	}
+	return b.String(), nil
+}
+
+func gobDecode(s string, v interface{}) error {
+	dec := gob.NewDecoder(strings.NewReader(s))
+	err := dec.Decode(v)
+	if err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+	return nil
 }
