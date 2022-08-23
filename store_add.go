@@ -23,87 +23,47 @@ end
 
 func (s *Store) Add(
 	ctx context.Context,
-	typeName string,
-	id string,
-	item Item,
+	item *Item,
 ) error {
-	if typeName == "" {
-		return fmt.Errorf("type name must not be empty")
-	}
-	if id == "" {
-		return fmt.Errorf("id must not be empty")
-	}
 	if item == nil {
 		return fmt.Errorf("item must not be nil")
 	}
-
-	// get indexed field names
-	typ, err := s.getType(ctx, typeName)
-	if err != nil {
-		return fmt.Errorf("get type: %w", err)
+	if err := item.Validate(); err != nil {
+		return fmt.Errorf("item validate: %w", err)
 	}
 
-	// check index fields
-	indexValues := make(map[string]float64)
-	for _, index := range typ.Indexes {
-		v, ok := item[index]
-		if !ok {
-			return fmt.Errorf("must include indexed field: %s", index)
-		}
-		switch v := v.(type) {
-		case int:
-			indexValues[index] = float64(v)
-		case int8:
-			indexValues[index] = float64(v)
-		case int16:
-			indexValues[index] = float64(v)
-		case int32:
-			indexValues[index] = float64(v)
-		case int64:
-			indexValues[index] = float64(v)
-		case uint:
-			indexValues[index] = float64(v)
-		case uint8:
-			indexValues[index] = float64(v)
-		case uint16:
-			indexValues[index] = float64(v)
-		case uint32:
-			indexValues[index] = float64(v)
-		case uint64:
-			indexValues[index] = float64(v)
-		default:
-			return fmt.Errorf(
-				"indexed field (%s) value must be a number: %v (type: %T)",
-				index,
-				v,
-				v,
-			)
-		}
-	}
-
-	// encoded item data
-	itemData, err := s.encodeItem(item)
+	// encoded item
+	encodedItem, err := item.Serialize()
 	if err != nil {
 		return fmt.Errorf("encode item: %w", err)
 	}
 
-	// keys and args
 	keys := []string{
-		s.baseKeyPrefix + keyPrefixItem + typeName + ":" + id,
+		s.baseKeyPrefix + keyPrefixItem + item.Kind() + ":" + item.ID(),
 	}
 	args := []interface{}{
-		id,
-		itemData,
+		item.ID(),
+		encodedItem,
 	}
-	for _, index := range typ.Indexes {
-		keys = append(
-			keys,
-			s.baseKeyPrefix+keyPrefixIndex+typeName+":"+index,
-		)
-		args = append(
-			args,
-			indexValues[index],
-		)
+
+	// check indexed fields
+	for name, field := range item.fields {
+		if field.Indexed {
+			indexKey :=
+				s.baseKeyPrefix + keyPrefixIndex + item.Kind() + ":" + name
+			switch field.ValueType {
+			case ItemValueTypeInt64,
+				ItemValueTypeFloat64:
+				keys = append(keys, indexKey)
+				args = append(args, field.Value)
+			default:
+				return fmt.Errorf(
+					"value type not indexable (field: %s): %s",
+					name,
+					field.ValueType.String(),
+				)
+			}
+		}
 	}
 
 	_, err = s.scriptAdd.Run(

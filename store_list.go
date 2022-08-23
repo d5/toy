@@ -33,13 +33,13 @@ return res
 
 func (s *Store) List(
 	ctx context.Context,
-	typeName string,
+	kind string,
 	sortBy string,
 	descending bool,
 	offset, limit int64,
-) (items []Item, hasMore bool, err error) {
-	if typeName == "" {
-		err = fmt.Errorf("type name must not be empty")
+) (items []*Item, hasMore bool, err error) {
+	if kind == "" {
+		err = fmt.Errorf("kind must not be empty")
 		return
 	}
 	if sortBy == "" {
@@ -55,25 +55,7 @@ func (s *Store) List(
 		return
 	}
 
-	// get type
-	typ, err := s.getType(ctx, typeName)
-	if err != nil {
-		err = fmt.Errorf("get type: %w", err)
-		return
-	}
-	var isIndexed bool
-	for _, fieldName := range typ.Indexes {
-		if fieldName == sortBy {
-			isIndexed = true
-			break
-		}
-	}
-	if !isIndexed {
-		err = fmt.Errorf("sort by field must be indexed: %s", sortBy)
-		return
-	}
-
-	indexKey := s.baseKeyPrefix + keyPrefixIndex + typeName + ":" + sortBy
+	indexKey := s.baseKeyPrefix + keyPrefixIndex + kind + ":" + sortBy
 	rangeFuncName := "ZRANGE"
 	if descending {
 		rangeFuncName = "ZREVRANGE"
@@ -89,7 +71,7 @@ func (s *Store) List(
 			rangeFuncName,
 			offset,
 			limit,
-			s.baseKeyPrefix + keyPrefixItem + typeName + ":",
+			s.baseKeyPrefix + keyPrefixItem + kind + ":",
 		},
 	).Result()
 	if err != nil {
@@ -99,8 +81,8 @@ func (s *Store) List(
 	resList := res.([]interface{})
 	hasMore = resList[0] != nil
 	for _, entry := range resList[1:] {
-		var item Item
-		item, err = s.decodeItem(entry.(string))
+		var item *Item
+		item, err = DeserializeItem(entry.(string))
 		if err != nil {
 			err = fmt.Errorf("decode item: %w", err)
 			return

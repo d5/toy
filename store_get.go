@@ -9,11 +9,11 @@ import (
 
 func (s *Store) Get(
 	ctx context.Context,
-	typeName string,
+	kind string,
 	id string,
-) (item Item, found bool, err error) {
-	if typeName == "" {
-		err = fmt.Errorf("type name must not be empty")
+) (item *Item, found bool, err error) {
+	if kind == "" {
+		err = fmt.Errorf("kind must not be empty")
 		return
 	}
 	if id == "" {
@@ -21,7 +21,7 @@ func (s *Store) Get(
 		return
 	}
 
-	key := s.baseKeyPrefix + keyPrefixItem + typeName + ":" + id
+	key := s.baseKeyPrefix + keyPrefixItem + kind + ":" + id
 	v, err := s.conn.Get(ctx, key).Result()
 	if err != nil {
 		if err == redis.Nil {
@@ -32,9 +32,9 @@ func (s *Store) Get(
 		err = fmt.Errorf("redis get: %w", err)
 		return
 	}
-	item, err = s.decodeItem(v)
+	item, err = DeserializeItem(v)
 	if err != nil {
-		err = fmt.Errorf("decode item: %w", err)
+		err = fmt.Errorf("deserialize item: %w", err)
 		return
 	}
 	found = true
